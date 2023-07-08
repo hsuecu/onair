@@ -25,7 +25,14 @@
 */
 #define FLG_REPEAT_COUNT 3
 
-using namespace std;
+using std::cin;
+using std::cout;
+using std::vector;
+using std::string;
+using std::map;
+using std::complex;
+using std::endl;
+using std::cerr;
 
 namespace Uplink
 {
@@ -94,14 +101,15 @@ namespace Uplink
         unsigned int end_time;
 
     public:
-        Sender();
+        Sender(float q1, float q0);
         void flush();
         void relayFlag(FlagType type);
         void sleep_estimator();
-        void sync(int msg_len);
+        void sync();
         void dsync();
         void put(char c);
         void puts(string str);
+        string getInput();
         ~Sender();
     };
 
@@ -165,10 +173,15 @@ namespace Downlink{
 
     public:
         Receiver(void);
-        Receiver(float q1, float q0, float sr);
+        Receiver(float q1, float q0);
         void listen();
         void start();
+        
+        /*used to know that if an empty string was being send from sender
+          as empty string is symbolic to switching between modes.*/
         bool isBreak();
         ~Receiver();
     };
 };
+
+string trim(string);

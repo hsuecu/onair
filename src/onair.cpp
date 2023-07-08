@@ -35,40 +35,30 @@ vector<int> Uplink::HexPulseConvertor::finish() {
 }
 
 
-
-Uplink::Sender::Sender(){
+Uplink::Sender::Sender(float q1, float q0){
     // upon observation sample_width must be equal to frames size
     sample_width = 1920;
     sample_rate = 384000;
     frames = 1920;
-    oscillator = DifferentialEncoderOscillator(19000, 18800, 384000);
+    oscillator = DifferentialEncoderOscillator(q1, q0, sample_rate);
     convertor = HexPulseConvertor();
 
     pcm = snd_pcm_open(&(pcm_handle), "default", SND_PCM_STREAM_PLAYBACK, 0);
     assert(pcm >= 0);
-
     snd_pcm_hw_params_alloca(&(params));
-
     pcm = snd_pcm_hw_params_any(pcm_handle, params);
     assert(pcm >= 0);
-
     pcm = snd_pcm_hw_params_set_access(pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
     assert(pcm >= 0);
-
     pcm = snd_pcm_hw_params_set_format(pcm_handle, params, SND_PCM_FORMAT_S32);
     assert(pcm >= 0);
-
     pcm = snd_pcm_hw_params_set_rate_near(pcm_handle, params, &(sample_rate), &(dir));
     assert(pcm >= 0);
-
     pcm = snd_pcm_hw_params_set_period_size_near(pcm_handle, params, &(frames), &(dir));
     assert(pcm >= 0);
-
     pcm = snd_pcm_hw_params(pcm_handle, params);
     assert(pcm >= 0);
-
     snd_pcm_hw_params_get_period_size(params, &(frames), &(dir));
-
     buffer_size = frames;
     buffer = (int32_t*) malloc(sizeof(int32_t)*(buffer_size));
 }
@@ -102,7 +92,8 @@ void Uplink::Sender::relayFlag(FlagType type) {
 
 void Uplink::Sender::sleep_estimator() {
     unsigned int diff = end_time - start_time;
-    unsigned int ret = frame_cnt / 200;
+    unsigned int ret = frame_cnt / 200; // each frame is 1920 byte long and it takes 200 micro seconds
+                                        // to relay at 384000
     ret = ret - diff;
     if(ret > 0) {
         sleep(ret+1);
@@ -112,23 +103,17 @@ void Uplink::Sender::sleep_estimator() {
     }
 }
 
-void Uplink::Sender::sync(int msg_len) {
-    //if(msg_len < 12) sleep(1);
-    //else if(msg_len < 24) sleep(2);
-    //else sleep(3); // 3 seconds is just right enough
-
+void Uplink::Sender::sync() {
+    usleep(500000);
     frame_cnt = 3;
     start_time = time(NULL);
-
     pcm = snd_pcm_prepare(pcm_handle);
     assert(pcm >= 0);
     relayFlag(sender_sync_flg);
 }
 
 void Uplink::Sender::dsync() {
-
     frame_cnt += 3;
-
     relayFlag(sender_fin_flg);
     end_time = time(NULL);
 }
@@ -148,9 +133,21 @@ void Uplink::Sender::put(char c) {
 }
 
 void Uplink::Sender::puts(string str) {
+    this->sync();
     for(auto c: str) {
         put(c);
     }
+    this->dsync();
+    this->sleep_estimator();
+}
+
+string Uplink::Sender::getInput() {
+    cout << "<<< ";
+    cout.flush();
+    string line;
+    getline(cin, line, '\n');
+    line = trim(line);
+    return line;
 }
 
 Uplink::Sender::~Sender() {
@@ -177,7 +174,6 @@ Downlink::Decoder::Decoder(){
     translator["...."] = 0x0E;
     translator["...-"] = 0x0F;
     translator[""] = 0x00;
-
     working = false;
     was_word_seen = false;
 };
@@ -282,10 +278,10 @@ int Downlink::Decoder::process(int value) {
     return 1;
 }
 
-Downlink::Receiver::Receiver(float q1, float q0, float sr){
+Downlink::Receiver::Receiver(float q1, float q0){
     q_1=q1;
     q_0=q0,
-    sample_rate=sr;
+    sample_rate=384000;
     /*default variables setup*/
     float a = (2 * M_PI * q_1)/sample_rate;
     float b = (2 * M_PI * q_0)/sample_rate;
@@ -311,32 +307,23 @@ Downlink::Receiver::Receiver(float q1, float q0, float sr){
     pcm = snd_pcm_open(&pcm_handle, "default", SND_PCM_STREAM_CAPTURE, 0);
     assert(pcm >=0);
     snd_pcm_hw_params_alloca(&params);
-
     pcm = snd_pcm_hw_params_any(pcm_handle, params);
     assert(pcm >=0);
-
     pcm = snd_pcm_hw_params_set_access(pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
     assert(pcm >=0);
-
     pcm = snd_pcm_hw_params_set_format(pcm_handle, params, SND_PCM_FORMAT_S32);
     assert(pcm >=0);
-
     pcm = snd_pcm_hw_params_set_channels(pcm_handle, params, 1);
     assert(pcm >=0);
-
     unsigned int _sr = sample_rate;
     pcm = snd_pcm_hw_params_set_rate_near(pcm_handle, params, &_sr, &dir);
     assert(pcm >=0);
-
     frames = 1920;
     pcm = snd_pcm_hw_params_set_period_size_near(pcm_handle, params, &frames, &dir);
     assert(pcm >=0);
-
     pcm = snd_pcm_hw_params(pcm_handle, params);
     assert(pcm >=0);
-
     snd_pcm_hw_params_get_period_size(params, &frames, &dir);
-
     /*buffer setup*/
     buffer_size = 3 * frames;
     buffer = (int32_t*) malloc(sizeof(int32_t)*buffer_size);
@@ -358,7 +345,6 @@ void Downlink::Receiver::start() {
     decoder.char_cntReset();
     snd_pcm_prepare(pcm_handle);
     do{
-        //if(fread(buffer + dft_window, sizeof(int32_t) * sample_rate, 1, stdin) != 1) break;
         listen();
         for(int k=0, r=0; k < 2 * frames and working;k+=dft_repeat_factor, r++) {
             x_q1 = {0, 0};
@@ -372,6 +358,8 @@ void Downlink::Receiver::start() {
             else working = false;
         }
     }while(working);
+    cout << endl;
+    cout.flush();
 }
 
 
@@ -383,4 +371,14 @@ Downlink::Receiver::~Receiver() {
     snd_pcm_drain(pcm_handle);
     snd_pcm_close(pcm_handle);
     free(buffer);
+}
+
+string trim(string line){
+    string newString;
+    for (char ch : line){
+        if (ch == '\n' || ch == '\r')
+            continue;
+        newString += ch;
+    }
+    return newString;
 }

@@ -1,42 +1,54 @@
 #include "./include/onair.h"
 
+#include <getopt.h>
+
 #define SENDER 11
 #define RECEIVER 12
 
-int main(int argc, const char ** argv) {
-    Uplink::Sender sender;
-    int sender_previous_line_len = 255;
+int main(int argc, char ** argv) {
     string line;
-
-    Downlink::Receiver receiver(19000, 18800, 384000);
-
     int mode;
-    if(argc > 1) mode = SENDER;
-    else mode = RECEIVER;
+
+    Uplink::Sender sender(19000, 18800);
+    Downlink::Receiver receiver(19000, 18800);
+
+    int option_val = 0;
+    option_val = getopt(argc, argv, "m:h");
+    switch(option_val) {
+        case 'm': {
+            if(optarg == NULL) puts("no mode information given");
+            if(strcmp(optarg, "sender")==0) mode=SENDER;
+            else if(strcmp(optarg, "receiver")==0) mode=RECEIVER;
+            else {
+                puts("allowed modes are receiver/sender");
+                exit(0);
+            }
+        };break;
+        case 'h': {
+            puts("-m sender\tstart in receiver mode\n-m receiver\tstart in sender mode\n-h\t\tfor this help message\n");
+            exit(0);
+        }break;
+        default: {
+            puts("-m sender\tstart in receiver mode\n-m receiver\tstart in sender mode\n-h\t\tfor this help message\n");
+            exit(0);
+        }
+    }
+
 
     while(1) {
         if(mode == RECEIVER) {
             receiver.start();
-            cout << endl;
-            cout.flush();
             if(receiver.isBreak())
             mode = SENDER;
             continue;
         }
-        usleep(500000);
-        cout << "<<< ";
-        cout.flush();
-        getline(cin, line, '\n');
-        sender.sync(sender_previous_line_len);
+        
+        line = sender.getInput();
+        
         sender.puts(line);
-        sender.dsync();
-        sender_previous_line_len = line.length();
-
-        sender.sleep_estimator();
 
         if(line.length() == 0){
             mode = RECEIVER;
-            cout << endl;
         }
     }
     return 0;
